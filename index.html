@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Safe Zone - 2D Platformer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #0f0f13;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: #fff;
+            overflow: hidden;
+        }
+        #gameTitle {
+            font-size: 32px;
+            font-weight: bold;
+            color: #00ffcc;
+            text-shadow: 0 0 10px rgba(0, 255, 204, 0.5);
+            margin-bottom: 15px;
+            letter-spacing: 4px;
+        }
+        #gameContainer {
+            box-shadow: 0 0 30px rgba(0, 255, 204, 0.2);
+            border: 2px solid #334455;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #111622;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+<div id="gameTitle">SAFE ZONE</div>
+<div id="gameContainer">
+    <canvas id="safeZoneCanvas" width="800" height="600"></canvas>
+</div>
+
+<script>
+const canvas = document.getElementById("safeZoneCanvas");
+const ctx = canvas.getContext("2d");
+
+// Physics Constants
+const gravityStandard = 0.6;
+const gravityGlide = 0.15;
+
+// Key Listener State Array
+const keys = {};
+window.addEventListener('keydown', (e) => { 
+    keys[e.code] = true; 
+    handleInputTriggers(e.code); 
+});
+window.addEventListener('keyup', (e) => { 
+    keys[e.code] = false; 
+});
+
+// Character Stat System (Using explicit RGB colors instead of Base64 strings)
+const PROFILE_DATA = {
+    Cat: { speed: 5, jumpForce: -15, ability: "High Jump", color: "#ff4444" },
+    Duck: { speed: 5, jumpForce: -11, ability: "Hold Space to Glide", color: "#ffff44" },
+    Chicken: { speed: 8, jumpForce: -11, ability: "Fast Runner", color: "#44ff44" }
+};
+const namesList = Object.keys(PROFILE_DATA);
+
+// State Machines
+let currentScene = "MENU"; 
+let activeZone = 1;
+let selectedIndex = 0;
+let pickedHero = "Cat";
+
+let hero = { x: 50, y: 400, w: 40, h: 40, vx: 0, vy: 0, grounded: false };
+let structuralFloors = [];
+let structuralSpikes = [];
+let clearGate = { x: 0, y: 0, w: 45, h: 65 };
+let zoneDirective = "";
+
+function generateZone(zoneNum) {
+    structuralFloors = [];
+    structuralSpikes = [];
+    hero.vx = 0; hero.vy = 0;
+    hero.x = 50; hero.y = 400;
+
+    if (zoneNum === 1) {
+        zoneDirective = "ZONE 1: Learn Controls (A/D or Arrows) & Leap over the Spike";
+        structuralFloors.push({ x: 0, y: 500, w: 450, h: 100 });
+        structuralFloors.push({ x: 490, y: 500, w: 310, h: 100 });
+        structuralSpikes.push({ x: 455, y: 472, w: 28, h: 28 });
+        clearGate.x = 730; clearGate.y = 435;
+    } else {
+        zoneDirective = "ZONE 2: Avoid the Bottomless Pit and clear the Island Spike!";
+        structuralFloors.push({ x: 0, y: 500, w: 230, h: 100 });
+        structuralFloors.push({ x: 390, y: 500, w: 200, h: 100 });
+        structuralSpikes.push({ x: 475, y: 472, w: 28, h: 28 });
+        structuralFloors.push({ x: 660, y: 430, w: 140, h: 170 });
+        clearGate.x = 735; clearGate.y = 365;
+    }
+}
+
+function handleInputTriggers(code) {
+    if (currentScene === "MENU") {
+        if (code === "ArrowLeft" || code === "KeyA") selectedIndex = (selectedIndex - 1 + namesList.length) % namesList.length;
+        if (code === "ArrowRight" || code === "KeyD") selectedIndex = (selectedIndex + 1) % namesList.length;
+        if (code === "Enter" || code === "Space") {
+            pickedHero = namesList[selectedIndex];
+            activeZone = 1;
+            generateZone(activeZone);
+            currentScene = "IN_GAME";
+        }
+    } else if (currentScene === "IN_GAME") {
+        if (code === "KeyR") generateZone(activeZone); 
+        if ((code === "Space" || code === "ArrowUp" || code === "KeyW") && hero.grounded) {
+            hero.vy = PROFILE_DATA[pickedHero].jumpForce;
+            hero.grounded = false;
+        }
+    } else if (currentScene === "GAME_OVER_WIN") {
+        if (code === "Enter" || code === "Space") currentScene = "MENU";
+    }
+}
+
+function hitboxesOverlapping(objA, objB) {
+    return objA.x < objB.x + objB.w &&
+           objA.x + objA.w > objB.x &&
+           objA.y < objB.y + objB.h &&
+           objA.y + objA.h > objB.y;
+}
+
+function updateLogic() {
+    if (currentScene !== "IN_GAME") return;
+
+    const stats = PROFILE_DATA[pickedHero];
+
+    hero.vx = 0;
+    if (keys["ArrowLeft"] || keys["KeyA"]) hero.vx = -stats.speed;
+    if (keys["ArrowRight"] || keys["KeyD"]) hero.vx = stats.speed;
+
+    let fallGravity = gravityStandard;
+    if (pickedHero === "Duck" && hero.vy > 0 && (keys["Space"] || keys["ArrowUp"] || keys["KeyW"])) {
+        fallGravity = gravityGlide;
+    }
+    hero.vy += fallGravity;
+
+    hero.x += hero.vx;
+    for (let floor of structuralFloors) {
+        if (hitboxesOverlapping(hero, floor)) {
+            if (hero.vx > 0) hero.x = floor.x - hero.w;
+            if (hero.vx < 0) hero.x = floor.x + floor.w;
+        }
+    }
+
+    hero.y += hero.vy;
+    hero.grounded = false;
+    for (let floor of structuralFloors) {
+        if (hitboxesOverlapping(hero, floor)) {
+            if (hero.vy > 0) {
+                hero.y = floor.y - hero.h;
+                hero.vy = 0;
+                hero.grounded = true;
+            } else if (hero.vy < 0) {
+                hero.y = floor.y + floor.h;
+                hero.vy = 0;
+            }
+        }
+    }
+
+    if (hero.y > canvas.height) generateZone(activeZone);
+
+    for (let spike of structuralSpikes) {
+        if (hitboxesOverlapping(hero, spike)) generateZone(activeZone);
+    }
+
+    if (hitboxesOverlapping(hero, clearGate)) {
+        if (activeZone < 2) {
+            activeZone++;
+            generateZone(activeZone);
+        } else {
+            currentScene = "GAME_OVER_WIN";
+        }
+    }
+}
+
+function drawGraphics() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (currentScene === "MENU") {
+        ctx.fillStyle = "#111622";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "#00ffcc";
+        ctx.font = "bold 24px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("CHOOSE YOUR HERO", canvas.width / 2, 100);
+
+        ctx.fillStyle = "#8899a6";
+        ctx.font = "14px monospace";
+        ctx.fillText("Navigate [A/D or Arrows] — Select [Enter or Space]", canvas.width / 2, 140);
+
+        let bW = 190, bH = 240, startPointX = canvas.width / 2 - (3 * bW + 2 * 25) / 2;
+
+        namesList.forEach((name, idx) => {
+            let currentX = startPointX + idx * (bW + 25);
+            let currentY = 220;
+
+            ctx.fillStyle = "#1b2436";
+            ctx.fillRect(currentX, currentY, bW, bH);
+
+            if (idx === selectedIndex) {
+                ctx.strokeStyle = "#00ffcc";
+                ctx.lineWidth = 3;
+            } else {
+                ctx.strokeStyle = "#384a66";
+                ctx.lineWidth = 1;
+            }
+            ctx.strokeRect(currentX, currentY, bW, bH);
+
+            // Pure geometric animal rendering block
+            ctx.fillStyle = PROFILE_DATA[name].color;
+            ctx.fillRect(currentX + bW / 2 - 20, currentY + 40, 40, 40);
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 18px monospace";
+            ctx.fillText(name, currentX + bW / 2, currentY + 125);
+
+            ctx.fillStyle = "#00ffcc";
+            ctx.font = "11px monospace";
+            ctx.fillText(PROFILE_DATA[name].ability, currentX + bW / 2, currentY + 175);
+        });
+
+    } else if (currentScene === "IN_GAME") {
+        ctx.fillStyle = "#161d29"; 
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "#2c3b54";
+        for (let floor of structuralFloors) {
+            ctx.fillRect(floor.x, floor.y, floor.w, floor.h);
+            ctx.fillStyle = "#00ffcc";
+            ctx.fillRect(floor.x, floor.y, floor.w, 3); 
+            ctx.fillStyle = "#2c3b54";
+        }
+
+        ctx.fillStyle = "#ff4466";
+        for (let spike of structuralSpikes) {
+            ctx.beginPath();
+            ctx.moveTo(spike.x, spike.y + spike.h);
+            ctx.lineTo(spike.x + spike.w / 2, spike.y);
+            ctx.lineTo(spike.x + spike.w, spike.y + spike.h);
+            ctx.fill();
+        }
+
+        ctx.fillStyle = "rgba(0, 255, 204, 0.15)";
+        ctx.fillRect(clearGate.x, clearGate.y, clearGate.w, clearGate.h);
+        ctx.strokeStyle = "#00ffcc";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(clearGate.x, clearGate.y, clearGate.w, clearGate.h);
+
+        // Render geometric square hero
+        ctx.fillStyle = PROFILE_DATA[pickedHero].color;
+        ctx.fillRect(hero.x, hero.y, hero.w, hero.h);
+
+        ctx.fillStyle = "#0b0e14";
+        ctx.fillRect(0, 0, canvas.width, 45);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "12px monospace";
+        ctx.textAlign = "left";
+        ctx.fillText(`HERO: ${pickedHero} | ${zoneDirective} | [R] Reset`, 15, 26);
+
+    } else if (currentScene === "GAME_OVER_WIN") {
+        ctx.fillStyle = "#0b0e14";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "#00ffcc";
+        ctx.font = "bold 20px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("ALL SAFE ZONES SECURED! Levels Mastered! More coming soon!", canvas.width / 2, canvas.height / 2 - 20);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "14px monospace";
+        ctx.fillText("Press Space or Enter to return to Hero Choice Menu", canvas.width / 2, canvas.height / 2 + 25);
+    }
+}
+
+function processFrame() {
+    updateLogic();
+    drawGraphics();
+    requestAnimationFrame(processFrame);
+}
+
+processFrame();
+</script>
+
+</body>
+</html>
